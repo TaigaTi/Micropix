@@ -135,7 +135,7 @@ plt.legend()
 plt.show()
 
 # === Save Model ===
-model.save('micropix.keras')
+# model.save('micropix.keras')
 
 # === Export Results ===
 config = {
@@ -151,3 +151,4 @@ config = {
 }
 
 export_report(config, model, history, test_acc, filename='micropix_report.pdf')
+
