@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow import keras
 import matplotlib.pyplot as plt
 from export_results import export_report
+from sklearn.utils import class_weight
 
 # === Config ===
 dataset_path = 'dataset/'
@@ -42,6 +43,14 @@ X_trainval, X_test, y_trainval, y_test = train_test_split(
 
 X_train, X_val, y_train, y_val = train_test_split(
     X_trainval, y_trainval, test_size=0.2, random_state=42, stratify=y_trainval)
+
+# === Find Class Weights ===
+class_weights = class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(y_train),
+    y=y_train
+)
+class_weights = dict(enumerate(class_weights))
 
 # === Noise Functions ===
 def add_gaussian_noise(images, mean=0.0, std=0.05):
@@ -81,6 +90,8 @@ data_augmentation = tf.keras.Sequential([
     tf.keras.layers.RandomRotation(0.1),
     tf.keras.layers.RandomZoom(0.1),
     tf.keras.layers.RandomContrast(0.1),
+    tf.keras.layers.Lambda(lambda x: tf.image.random_brightness(x, max_delta=0.1)),
+    tf.keras.layers.RandomTranslation(0.05, 0.05),
 ])
 
 # === Apply Augmentation to Training Set ===
@@ -120,12 +131,13 @@ model.compile(
 history = model.fit(
     train_ds,
     validation_data=val_ds,
-    epochs=10 
+    epochs=10,
+    class_weight=class_weights,
 )
 
 # === Evaluate Model ===
-test_loss, test_acc = model.evaluate(test_ds)
-print(f'Test accuracy: {test_acc:.2f}')
+test_loss, test_acc= model.evaluate(test_ds)
+print(f'Test Accuracy: {test_acc * 100:.2f}%')
 
 plt.plot(history.history['accuracy'], label='Train Accuracy')
 plt.plot(history.history['val_accuracy'], label='Val Accuracy')
@@ -138,16 +150,30 @@ plt.show()
 # model.save('micropix.keras')
 
 # === Export Results ===
+class_weights = {k: round(float(v), 3) for k, v in class_weights.items()}
+
+augmentation_summary = (
+    "RandomFlip(horizontal), "
+    "RandomRotation(0.1 radians), "
+    "RandomZoom(0.1), "
+    "RandomContrast(0.1), "
+    "RandomBrightness(0.1)"
+    "RandomTranslation(0.05, 0.05)"
+)
+
 config = {
     'Image Size': IMAGE_SIZE,
     'Batch Size': BATCH_SIZE,
     'Number of Classes': len(class_names),
+    'Class Weights': class_weights,
     'Epochs': 10,
+    'Data Augmentation': augmentation_summary,
     'Gaussian Noise STD': 0.03,
     'Salt-Pepper Noise Amount': 0.01,
     'Train Size': len(X_train),
     'Validation Size': len(X_val),
     'Test Size': len(X_test),
+    'Comments': 'Reduced random translation augmentation to 5%',
 }
 
 export_report(config, model, history, test_acc, filename='micropix_report.pdf')
