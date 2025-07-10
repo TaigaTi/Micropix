@@ -8,6 +8,7 @@ from keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 from export_results import export_report
 from sklearn.utils import class_weight
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 # === Config ===
 dataset_path = 'dataset/'
@@ -15,9 +16,16 @@ IMAGE_SIZE = (224, 224)
 BATCH_SIZE = 32
 BASE_EPOCHS = 10
 EPOCHS = 30
-GAUSSIAN_STD = 0.00
-SALT_AND_PEPPER_AMT = 0.00
+GAUSSIAN_STD = 0.01
+SALT_AND_PEPPER_AMT = 0.01
 SALT_VS_PEPPER = 0.5
+LAMBDA = 0.15
+FLIP = "horizontal"
+ROTATION = 0.15
+ZOOM = 0.15
+CONTRAST = 0.15
+
+
 
 # === Load and Preprocess Images ===
 images = []
@@ -82,8 +90,8 @@ def add_salt_pepper_noise(images, amount=SALT_AND_PEPPER_AMT, s_vs_p=SALT_VS_PEP
     return noisy
 
 # === Apply Noise to Training Data ===
-X_train = add_gaussian_noise(X_train, std=GAUSSIAN_STD)
-X_train = add_salt_pepper_noise(X_train, amount=SALT_AND_PEPPER_AMT)
+# X_train = add_gaussian_noise(X_train, std=GAUSSIAN_STD)
+# X_train = add_salt_pepper_noise(X_train, amount=SALT_AND_PEPPER_AMT)
 
 # === Convert to TensorFlow Datasets ===
 train_ds = tf.data.Dataset.from_tensor_slices((X_train, y_train)).shuffle(1000).batch(BATCH_SIZE)
@@ -92,11 +100,11 @@ test_ds = tf.data.Dataset.from_tensor_slices((X_test, y_test)).batch(BATCH_SIZE)
 
 # === Define TensorFlow Data Augmentation ===
 data_augmentation = tf.keras.Sequential([
-    # tf.keras.layers.RandomFlip("horizontal"),
-    tf.keras.layers.RandomRotation(0.05),
-    tf.keras.layers.RandomZoom(0.05),
-    tf.keras.layers.RandomContrast(0.05),
-    tf.keras.layers.Lambda(lambda x: tf.image.random_brightness(x, max_delta=0.05)),
+    tf.keras.layers.RandomFlip("horizontal"),
+    tf.keras.layers.RandomRotation(0.1),
+    tf.keras.layers.RandomZoom(0.1),
+    tf.keras.layers.RandomContrast(0.1),
+    tf.keras.layers.Lambda(lambda x: tf.image.random_brightness(x, max_delta=0.1)),
 ])
 
 # === Apply Augmentation to Training Set ===
@@ -107,7 +115,7 @@ test_ds = test_ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
 
 # === Define Base Model ===
-base_model = keras.applications.EfficientNetB0(
+base_model = keras.applications.MobileNetV2(
     input_shape=(224,224,3),
     include_top=False,
     weights='imagenet'
@@ -117,7 +125,7 @@ base_model.trainable = False
 model = keras.Sequential([
     base_model,
     keras.layers.GlobalAveragePooling2D(),
-    keras.layers.Dropout(0.5),
+    keras.layers.Dropout(0.6),
     keras.layers.Dense(len(class_names), activation='softmax')
 ])
 
@@ -139,13 +147,19 @@ history = model.fit(
 # === Train Deeper Layers ===
 base_model.trainable = True
 
-# Fine tune only the top 20 layers
-for layer in base_model.layers[:-20]:
+# Fine tune only the top 50 layers
+for layer in base_model.layers[:-50]:
     layer.trainable = False
 
 # Recompile with a **lower learning rate**
+lr_schedule = keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate=1e-4,
+    decay_steps=1000,
+    decay_rate=0.96
+)
+
 model.compile(
-    optimizer=keras.optimizers.Adam(learning_rate=1e-5),
+    optimizer = keras.optimizers.Adam(learning_rate=lr_schedule),
     loss='sparse_categorical_crossentropy',
     metrics=['accuracy']
 )
@@ -163,6 +177,19 @@ fine_tune_history = model.fit(train_ds, validation_data=val_ds, epochs=EPOCHS, c
 # === Evaluate Model ===
 test_loss, test_acc= model.evaluate(test_ds)
 print(f'Test Accuracy: {test_acc * 100:.2f}%')
+
+
+# === Predict on Test Set ===
+y_pred_probs = model.predict(X_test)
+y_pred = np.argmax(y_pred_probs, axis=1)
+
+# === Confusion Matrix ===
+cm = confusion_matrix(y_test, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+disp.plot(cmap='Blues', xticks_rotation=45)
+plt.title('Confusion Matrix')
+plt.tight_layout()
+plt.show()
 
 # Combine accuracy and val_accuracy
 acc = history.history['accuracy'] + fine_tune_history.history['accuracy']
@@ -185,11 +212,11 @@ plt.show()
 class_weights = {k: round(float(v), 3) for k, v in class_weights.items()}
 
 augmentation_summary = (
-    "RandomFlip(none), "
-    "RandomRotation(0.05 radians), "
-    "RandomZoom(0.05), "
-    "RandomContrast(0.05), "
-    "RandomBrightness(0.05)"
+    "RandomFlip({FLIP}), "
+    "RandomRotation({ROTATION} radians), "
+    "RandomZoom({ZOOM}), "
+    "RandomContrast({CONTRAST}), "
+    "RandomBrightness({LAMBDA})"
 )
 
 config = {
@@ -205,8 +232,8 @@ config = {
     'Train Size': len(X_train),
     'Validation Size': len(X_val),
     'Test Size': len(X_test),
-    'Comments': 'Using EfficientNetB0, fine tune only the top 20 layers, actually removed gaussian and salt & pepper',
+    'Comments': 'Using MobileNetV2, increased zoom and rotation augmentation',
 }
 
-export_report(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
+export_report(config, model, history, fine_tune_history, y_test, y_pred, class_names, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
 

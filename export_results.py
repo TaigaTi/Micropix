@@ -5,6 +5,29 @@ from reportlab.lib.units import inch
 import matplotlib.pyplot as plt
 import io
 from pypdf import PdfReader, PdfWriter
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+def plot_confusion_matrix(y_true, y_pred, class_names, normalize=False, figsize=(8, 6), cmap='Blues', save_path=None):
+    cm = confusion_matrix(y_true, y_pred)
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1, keepdims=True)
+
+    plt.figure(figsize=figsize)
+    sns.heatmap(cm, annot=True, fmt=".2f" if normalize else "d", cmap=cmap,
+                xticklabels=class_names, yticklabels=class_names)
+    plt.title('Confusion Matrix' + (' (Normalized)' if normalize else ''))
+    plt.xlabel('Predicted label')
+    plt.ylabel('True label')
+    plt.xticks(rotation=45)
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+        print(f"Confusion matrix saved to {save_path}")
+    plt.show()
+
 
 def save_training_plot(base_history, fine_tune_history=None, filename='training_plot.png', base_epochs=0):
     plt.figure(figsize=(8, 6))
@@ -38,10 +61,12 @@ def get_model_summary(model):
     stream.close()
     return summary_str
 
-def create_report_pdf(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc):
+def create_report_pdf(config, model, history, fine_tune_history, y_true, y_pred, class_names, BASE_EPOCHS, test_acc):
     buffer = io.BytesIO()
 
     save_training_plot(history, fine_tune_history, filename='training_plot.png', base_epochs=BASE_EPOCHS)
+    plot_confusion_matrix(y_true, y_pred, class_names, normalize=False, save_path="confusion_matrix.png")
+    
     model_summary = get_model_summary(model)
 
     doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -71,15 +96,19 @@ def create_report_pdf(config, model, history, fine_tune_history, BASE_EPOCHS, te
     elements.append(Paragraph("Training Accuracy over Epochs:", styles['Heading2']))
     elements.append(Image('training_plot.png', width=6*inch, height=4*inch))
     elements.append(Spacer(1, 12))
+    
+    elements.append(Paragraph("Confusion Matrix:", styles['Heading2']))
+    elements.append(Image('confusion_matrix.png', width=6*inch, height=4*inch))
+    elements.append(Spacer(1, 12))
 
     doc.build(elements)
 
     buffer.seek(0)
     return buffer
 
-def export_report(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc, filename='report.pdf'):
+def export_report(config, model, history, fine_tune_history, y_true, y_pred, class_names, BASE_EPOCHS, test_acc, filename='report.pdf'):
     # Create new report PDF in memory
-    new_pdf_buffer = create_report_pdf(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc)
+    new_pdf_buffer = create_report_pdf(config, model, history, fine_tune_history, y_true, y_pred, class_names, BASE_EPOCHS, test_acc)
 
     writer = PdfWriter()
 
