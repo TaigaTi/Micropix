@@ -6,10 +6,24 @@ import matplotlib.pyplot as plt
 import io
 from pypdf import PdfReader, PdfWriter
 
-def save_training_plot(history, filename='training_plot.png'):
+def save_training_plot(base_history, fine_tune_history=None, filename='training_plot.png', base_epochs=0):
     plt.figure(figsize=(8, 6))
-    plt.plot(history.history['accuracy'], label='Train Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+
+    # Combine histories
+    acc = base_history.history['accuracy']
+    val_acc = base_history.history['val_accuracy']
+
+    if fine_tune_history:
+        acc += fine_tune_history.history['accuracy']
+        val_acc += fine_tune_history.history['val_accuracy']
+
+    # Plot
+    plt.plot(acc, label='Train Accuracy')
+    plt.plot(val_acc, label='Val Accuracy')
+
+    if fine_tune_history:
+        plt.axvline(x=base_epochs - 1, color='gray', linestyle='--', label='Fine-tuning Start')
+
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy')
     plt.title('Training & Validation Accuracy')
@@ -24,10 +38,10 @@ def get_model_summary(model):
     stream.close()
     return summary_str
 
-def create_report_pdf(config, model, history, test_acc):
+def create_report_pdf(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc):
     buffer = io.BytesIO()
 
-    save_training_plot(history)
+    save_training_plot(history, fine_tune_history, filename='training_plot.png', base_epochs=BASE_EPOCHS)
     model_summary = get_model_summary(model)
 
     doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -63,9 +77,9 @@ def create_report_pdf(config, model, history, test_acc):
     buffer.seek(0)
     return buffer
 
-def export_report(config, model, history, test_acc, filename='report.pdf'):
+def export_report(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc, filename='report.pdf'):
     # Create new report PDF in memory
-    new_pdf_buffer = create_report_pdf(config, model, history, test_acc)
+    new_pdf_buffer = create_report_pdf(config, model, history, fine_tune_history, BASE_EPOCHS, test_acc)
 
     writer = PdfWriter()
 
