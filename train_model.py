@@ -17,12 +17,12 @@ INPUT_SHAPE = IMAGE_SIZE + (3,)
 BATCH_SIZE = 32
 BASE_EPOCHS = 20
 EPOCHS = 30
-DROPOUT = 0.4
-GAUSSIAN_STD = 0.005
+DROPOUT = 0.6
+GAUSSIAN_STD = 0.01
 BRIGHTNESS_DELTA = 0.2
 FLIP_MODE = "horizontal"
-ROTATION_FACTOR = 0.15
-ZOOM_FACTOR = 0.15 
+ROTATION_FACTOR = 0.2
+ZOOM_FACTOR = 0.2
 CONTRAST_FACTOR = 0.2
 
 # === Data Loading and Initial Preprocessing ===
@@ -117,6 +117,8 @@ model = keras.Sequential([
     base_model,
     keras.layers.GlobalAveragePooling2D(),
     keras.layers.Dropout(DROPOUT),
+    keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-4)),
+    keras.layers.Dropout(0.3),
     keras.layers.Dense(num_classes, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(1e-4))
 ])
 
@@ -139,7 +141,7 @@ history = model.fit(
 
 # === Fine-tuning Setup and Training ===
 base_model.trainable = True
-fine_tune_at = len(base_model.layers) - 50
+fine_tune_at = 100
 print(f"Fine-tuning from layer {fine_tune_at} ({base_model.layers[fine_tune_at].name}) onwards.")
 for layer in base_model.layers[:fine_tune_at]:
     layer.trainable = False
@@ -249,7 +251,7 @@ config = {
     'Optimizer (Base)': 'Adam',
     'Optimizer (Fine-tune)': f'Adam with ExponentialDecay(initial_lr={1e-4}, decay_rate={0.98})',
     'Early Stopping Patience': early_stopping.patience,
-    'Comments': 'Using MobileNetV2',
+    'Comments': 'Using MobileNetV2, fine tune more layers',
 }
 
 export_report(config, model, history, fine_tune_history, y_true_labels, y_pred, class_names, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
