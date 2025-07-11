@@ -17,7 +17,7 @@ INPUT_SHAPE = IMAGE_SIZE + (3,)
 BATCH_SIZE = 32
 BASE_EPOCHS = 20
 EPOCHS = 30
-DROPOUT = 0.5
+DROPOUT = 0.4
 GAUSSIAN_STD = 0.005
 BRIGHTNESS_DELTA = 0.2
 FLIP_MODE = "horizontal"
@@ -106,7 +106,7 @@ test_ds = test_ds.map(lambda x, y: preprocess_and_augment(x, y),
 test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
 
 # === Model Definition (MobileNetV2 Transfer Learning) ===
-base_model = keras.applications.EfficientNetV2B0 (
+base_model = keras.applications.MobileNetV2 (
     input_shape=INPUT_SHAPE,
     include_top=False,
     weights='imagenet'
@@ -249,7 +249,7 @@ config = {
     'Optimizer (Base)': 'Adam',
     'Optimizer (Fine-tune)': f'Adam with ExponentialDecay(initial_lr={1e-4}, decay_rate={0.98})',
     'Early Stopping Patience': early_stopping.patience,
-    'Comments': 'Using EfficientNetV2B0',
+    'Comments': 'Using MobileNetV2',
 }
 
 export_report(config, model, history, fine_tune_history, y_true_labels, y_pred, class_names, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
