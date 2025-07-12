@@ -24,6 +24,10 @@ FLIP_MODE = "horizontal"
 ROTATION_FACTOR = 0.2
 ZOOM_FACTOR = 0.2
 CONTRAST_FACTOR = 0.2
+HUE_FACTOR = 0.01
+TRANSLATION_FACTOR = 0.05
+SATURATION_FACTOR_LOWER = 0.8
+SATURATION_FACTOR_UPPER = 1.2
 
 # === Data Loading and Initial Preprocessing ===
 images = []
@@ -72,6 +76,10 @@ data_augmentation = tf.keras.Sequential([
     tf.keras.layers.RandomZoom(ZOOM_FACTOR, interpolation='bilinear', fill_mode='nearest', fill_value=0.0),
     tf.keras.layers.RandomContrast(CONTRAST_FACTOR),
     tf.keras.layers.Lambda(lambda x: tf.image.random_brightness(x, max_delta=BRIGHTNESS_DELTA)),
+    tf.keras.layers.RandomCrop(height=IMAGE_SIZE[0], width=IMAGE_SIZE[1]),
+    tf.keras.layers.RandomTranslation(height_factor=TRANSLATION_FACTOR , width_factor=TRANSLATION_FACTOR, fill_mode='nearest'),
+    tf.keras.layers.Lambda(lambda x: tf.image.random_hue(x, HUE_FACTOR)),
+    tf.keras.layers.Lambda(lambda x: tf.image.random_saturation(x, SATURATION_FACTOR_LOWER, SATURATION_FACTOR_UPPER)),
 ], name='data_augmentation_pipeline')
 
 # === TensorFlow Dataset Creation and Preprocessing ===
@@ -85,8 +93,8 @@ def preprocess_and_augment(image, label, augmentation_pipeline=None, apply_noise
         image = image + tf.random.normal(tf.shape(image), mean=0.0, stddev=GAUSSIAN_STD)
         image = tf.clip_by_value(image, 0.0, 255.0)
 
-    # MobileNetV2 preprocessing
-    image = tf.keras.applications.mobilenet_v2.preprocess_input(image)
+    # EfficientNetB3 preprocessing
+    image = tf.keras.applications.efficientnet.preprocess_input(image)
 
     return image, label
 
@@ -105,8 +113,8 @@ test_ds = test_ds.map(lambda x, y: preprocess_and_augment(x, y),
                      num_parallel_calls=tf.data.AUTOTUNE)
 test_ds = test_ds.batch(BATCH_SIZE).prefetch(buffer_size=tf.data.AUTOTUNE)
 
-# === Model Definition (MobileNetV2 Transfer Learning) ===
-base_model = keras.applications.MobileNetV2 (
+# === Model Definition (EfficientNetB3 Transfer Learning) ===
+base_model = keras.applications.EfficientNetB3  (
     input_shape=INPUT_SHAPE,
     include_top=False,
     weights='imagenet'
@@ -116,10 +124,14 @@ base_model.trainable = False
 model = keras.Sequential([
     base_model,
     keras.layers.GlobalAveragePooling2D(),
-    keras.layers.Dropout(DROPOUT),
-    keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-4)),
-    keras.layers.Dropout(0.3),
-    keras.layers.Dense(num_classes, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(1e-4))
+    # keras.layers.Dropout(DROPOUT),
+    keras.layers.SpatialDropout2D(0.3),
+
+    keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-3)),
+    # keras.layers.Dropout(0.3),
+    keras.layers.SpatialDropout2D(0.3),
+
+    keras.layers.Dense(num_classes, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(1e-3))
 ])
 
 # === Base Model Compilation ===
@@ -149,7 +161,7 @@ for layer in base_model.layers[:fine_tune_at]:
 lr_schedule = keras.optimizers.schedules.ExponentialDecay(
     initial_learning_rate=1e-4,
     decay_steps=1000,
-    decay_rate=0.96
+    decay_rate=0.96,
 )
 
 model.compile(
@@ -168,6 +180,36 @@ fine_tune_history = model.fit(
     callbacks=[early_stopping],
     class_weight=class_weights
 )
+
+
+# === Full Unfreeze ===
+print("\n--- Full Model Unfreeze Phase ---")
+
+# Unfreeze all layers in the base model
+for layer in base_model.layers:
+    layer.trainable = True
+
+# Define a very low learning rate for this final phase
+full_unfreeze_lr = 1e-5
+
+# Compile with stronger regularization if desired (L2, label smoothing, etc.)
+model.compile(
+    optimizer=keras.optimizers.Adam(learning_rate=full_unfreeze_lr),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# Optional: Extend early stopping or adjust callbacks
+full_unfreeze_early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1)
+
+# Train the fully unfrozen model
+full_unfreeze_history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=15,  # You can tune this
+    callbacks=[full_unfreeze_early_stopping],
+    class_weight=class_weights
+) 
 
 # === Model Evaluation ===
 print("\n--- Evaluating Model on Test Set ---")
@@ -199,6 +241,11 @@ acc = history.history['accuracy'] + fine_tune_history.history['accuracy']
 val_acc = history.history['val_accuracy'] + fine_tune_history.history['val_accuracy']
 loss = history.history['loss'] + fine_tune_history.history['loss']
 val_loss = history.history['val_loss'] + fine_tune_history.history['val_loss']
+
+acc += full_unfreeze_history.history['accuracy']
+val_acc += full_unfreeze_history.history['val_accuracy']
+loss += full_unfreeze_history.history['loss']
+val_loss += full_unfreeze_history.history['val_loss']
 
 plt.figure(figsize=(12, 5))
 plt.subplot(1, 2, 1)
@@ -243,6 +290,10 @@ config = {
     'RandomZoom Factor': ZOOM_FACTOR,
     'RandomContrast Factor': CONTRAST_FACTOR,
     'RandomBrightness MaxDelta': BRIGHTNESS_DELTA,
+    'RandomHue Factor': HUE_FACTOR,
+    'RandomSaturation Range': f"{SATURATION_FACTOR_LOWER}–{SATURATION_FACTOR_UPPER}",
+    'RandomTranslation Factor': TRANSLATION_FACTOR,
+    'RandomCrop Applied': True,
     'Gaussian Noise STD': GAUSSIAN_STD,
     'Dropout': DROPOUT,
     'Train Size': len(X_train),
@@ -251,7 +302,11 @@ config = {
     'Optimizer (Base)': 'Adam',
     'Optimizer (Fine-tune)': f'Adam with ExponentialDecay(initial_lr={1e-4}, decay_rate={0.98})',
     'Early Stopping Patience': early_stopping.patience,
-    'Comments': 'Using MobileNetV2, fine tune more layers',
+    'Full Unfreeze Phase': True,
+    'Full Unfreeze LR': full_unfreeze_lr,
+    'Label Smoothing': 0.1,
+    'Final Fine-tune Epochs': 15,
+    'Comments': 'Using EfficientNetB3, added model unfreeze, changed to spacial dropout',
 }
 
 export_report(config, model, history, fine_tune_history, y_true_labels, y_pred, class_names, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
