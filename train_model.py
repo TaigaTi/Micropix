@@ -25,7 +25,7 @@ ROTATION_FACTOR = 0.2
 ZOOM_FACTOR = 0.2
 CONTRAST_FACTOR = 0.2
 HUE_FACTOR = 0.01
-TRANSLATION_FACTOR = 0.05
+TRANSLATION_FACTOR = 0.1
 SATURATION_FACTOR_LOWER = 0.8
 SATURATION_FACTOR_UPPER = 1.2
 
@@ -124,13 +124,9 @@ base_model.trainable = False
 model = keras.Sequential([
     base_model,
     keras.layers.GlobalAveragePooling2D(),
-    # keras.layers.Dropout(DROPOUT),
-    keras.layers.SpatialDropout2D(0.3),
-
+    keras.layers.Dropout(DROPOUT),
     keras.layers.Dense(256, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(1e-3)),
-    # keras.layers.Dropout(0.3),
-    keras.layers.SpatialDropout2D(0.3),
-
+    keras.layers.Dropout(0.3),
     keras.layers.Dense(num_classes, activation='softmax', kernel_regularizer=tf.keras.regularizers.l2(1e-3))
 ])
 
@@ -306,7 +302,7 @@ config = {
     'Full Unfreeze LR': full_unfreeze_lr,
     'Label Smoothing': 0.1,
     'Final Fine-tune Epochs': 15,
-    'Comments': 'Using EfficientNetB3, added model unfreeze, changed to spacial dropout',
+    'Comments': 'Using EfficientNetB3, increased translation factor',
 }
 
 export_report(config, model, history, fine_tune_history, y_true_labels, y_pred, class_names, BASE_EPOCHS, test_acc, filename='micropix_report.pdf')
